@@ -47,14 +47,15 @@ import Text.TeXMath
 import Text.XML.Light.Output
 
 data WriterState = WriterState
-    { stNotes            :: [Html]  -- ^ List of notes
-    , stMath             :: Bool    -- ^ Math is used in document
-    , stHighlighting     :: Bool    -- ^ Syntax highlighting is used
-    , stSecNum           :: [Int]   -- ^ Number of current section
+    { stNotes            :: [Html]   -- ^ List of notes
+    , stMath             :: Bool     -- ^ Math is used in document
+    , stHighlighting     :: Bool     -- ^ Syntax highlighting is used
+    , stSecNum           :: [Int]    -- ^ Number of current section
+    , stIds              :: [String] -- ^ IDs that have been used
     } deriving Show
 
 defaultWriterState :: WriterState
-defaultWriterState = WriterState {stNotes= [], stMath = False, stHighlighting = False, stSecNum = []}
+defaultWriterState = WriterState {stNotes= [], stMath = False, stHighlighting = False, stSecNum = [], stIds = []}
 
 -- Helpers to render HTML with the appropriate function.
 
@@ -102,6 +103,10 @@ pandocToHtml opts (Pandoc (Meta title' authors' date') blocks) = do
              then inlineListToHtml opts date'
              else return noHtml 
   let sects = hierarchicalize blocks
+  let addId ids (Blk _) = ids
+      addId ids (Sec _ _ id' _ _) = id' : ids
+  let ids = foldl addId [] sects
+  modify $ \s -> s{ stIds = ids }
   toc <- if writerTableOfContents opts 
             then tableOfContents opts sects
             else return Nothing
@@ -238,6 +243,15 @@ elementToHtml opts (Sec level num id' title' elements) = do
                               else thediv ! [prefixedId opts id'] << stuff
                       else toHtmlFromList stuff
 
+getIdAttr :: [Inline] -> State WriterState [HtmlAttr]
+getIdAttr x = if null x
+                 then return []
+                 else do
+                   ids <- liftM stIds get
+                   let id' = uniqueIdent x ids
+                   modify $ \st -> st{ stIds = id' : ids }
+                   return [identifier id']
+
 -- | Convert list of Note blocks to a footnote <div>.
 -- Assumes notes are sorted.
 footnoteSection :: [Html] -> Html
@@ -303,12 +317,13 @@ blockToHtml :: WriterOptions -> Block -> State WriterState Html
 blockToHtml _ Null = return $ noHtml 
 blockToHtml opts (Plain lst) = inlineListToHtml opts lst
 blockToHtml opts (Para [Image txt (s,tit)]) = do
+  idattr <- getIdAttr txt
   img <- inlineToHtml opts (Image txt (s,tit))
   capt <- inlineListToHtml opts txt
   return $ if writerHtml5 opts
-              then tag "figure" <<
+              then tag "figure" ! idattr <<
                     [img, tag "figcaption" << capt]
-              else thediv ! [theclass "figure"] <<
+              else thediv ! (idattr ++ [theclass "figure"]) <<
                     [img, paragraph ! [theclass "caption"] << capt]
 blockToHtml opts (Para lst) = inlineListToHtml opts lst >>= (return . paragraph)
 blockToHtml _ (RawHtml str) = return $ primHtml str
@@ -406,6 +421,7 @@ blockToHtml opts (Table capt aligns widths headers rows') = do
   captionDoc <- if null capt
                    then return noHtml
                    else inlineListToHtml opts capt >>= return . caption
+  idattr <- getIdAttr capt
   let percent w = show (truncate (100*w) :: Integer) ++ "%"
   let widthAttrs w = if writerHtml5 opts
                         then [thestyle $ "width: " ++ percent w]
@@ -419,7 +435,7 @@ blockToHtml opts (Table capt aligns widths headers rows') = do
               else liftM (thead <<) $ tableRowToHtml opts aligns 0 headers
   body' <- liftM (tbody <<) $
                zipWithM (tableRowToHtml opts aligns) [1..] rows'
-  return $ table $ captionDoc +++ coltags +++ head' +++ body'
+  return $ table ! idattr $ captionDoc +++ coltags +++ head' +++ body'
 
 tableRowToHtml :: WriterOptions
                -> [Alignment]
@@ -556,15 +572,18 @@ inlineToHtml opts inline =
                                  if null tit then [] else [title tit]) $ 
                                  linkText
     (Image txt (s,tit)) -> do
-                        alternate <- inlineListToHtml opts txt
-                        let alternate' = renderFragment opts alternate
+                        idattr <- getIdAttr txt
+                        let alternate' = stringify txt
                         let attributes = [src s] ++
                                          (if null tit 
                                             then [] 
                                             else [title tit]) ++ 
                                          if null txt 
                                             then [] 
-                                            else [alt alternate']
+                                            else [alt alternate'] ++
+                                         if writerStrictMarkdown opts
+                                            then []
+                                            else idattr
                         return $ image ! attributes 
                         -- note:  null title included, as in Markdown.pl 
     (Note contents)          -> do 
