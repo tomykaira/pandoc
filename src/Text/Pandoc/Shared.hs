@@ -497,6 +497,7 @@ data WriterOptions = WriterOptions
   , writerHighlight        :: Bool       -- ^ Highlight source code
   , writerHighlightStyle   :: Style      -- ^ Style to use for highlighting
   , writerSetextHeaders    :: Bool       -- ^ Use setext headers for levels 1-2 in markdown
+  , writerCustomLua        :: String     -- ^ Lua script for custom writer
   } deriving Show
 
 {-# DEPRECATED writerXeTeX "writerXeTeX no longer does anything" #-}
@@ -535,6 +536,7 @@ defaultWriterOptions =
                 , writerHighlight        = False
                 , writerHighlightStyle   = pygments
                 , writerSetextHeaders    = True
+                , writerCustomLua        = ""
                 }
 
 --

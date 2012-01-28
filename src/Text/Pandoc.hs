@@ -99,6 +99,7 @@ module Text.Pandoc
                , writeEPUB
                , writeOrg
                , writeAsciiDoc
+               , writeCustom
                -- * Writer options used in writers 
                , WriterOptions (..)
                , HTMLSlideVariant (..)
@@ -141,6 +142,7 @@ import Text.Pandoc.Writers.MediaWiki
 import Text.Pandoc.Writers.Textile
 import Text.Pandoc.Writers.Org
 import Text.Pandoc.Writers.AsciiDoc
+import Text.Pandoc.Writers.Custom
 import Text.Pandoc.Templates
 import Text.Pandoc.Parsing
 import Text.Pandoc.Shared

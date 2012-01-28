@@ -969,7 +969,8 @@ main = do
                                       writerSlideLevel       = slideLevel,
                                       writerHighlight        = highlight,
                                       writerHighlightStyle   = highlightStyle,
-                                      writerSetextHeaders    = setextHeaders
+                                      writerSetextHeaders    = setextHeaders,
+                                      writerCustomLua        = ""
                                       }
 
   when (writerName' `elem` nonTextFormats&& outputFile == "-") $
@@ -1013,6 +1014,14 @@ main = do
                 processBiblio cslfile' cslabbrevs refs doc1
              else return doc1
 
+
+  let writerFn :: FilePath -> String -> IO ()
+      writerFn "-" = UTF8.putStr
+      writerFn f   = UTF8.writeFile f
+
+  let writeBinary :: B.ByteString -> IO ()
+      writeBinary  = B.writeFile (encodeString outputFile)
+
   case lookup writerName' writers of
         Nothing | writerName' == "epub" ->
            writeEPUB epubStylesheet writerOptions doc2 >>= writeBinary
@@ -1025,12 +1034,15 @@ main = do
               case res of
                    Right pdf -> writeBinary pdf
                    Left err' -> err 43 $ toString err'
-                | otherwise -> err 9 ("Unknown writer: " ++ writerName')
-          where writeBinary  = B.writeFile (encodeString outputFile)
+                | otherwise ->
+           do let script = writerName' ++ ".lua"
+              exists <- doesFileExist script
+              unless exists $ err 9 ("Unknown writer: " ++ writerName')
+              lua <- UTF8.readFile script  -- TODO readDataFile?
+              writeCustom writerOptions{ writerCustomLua = lua } doc2
+                >>= writerFn outputFile
         Just r  -> writerFn outputFile =<< postProcess result
-          where writerFn "-" = UTF8.putStr
-                writerFn f   = UTF8.writeFile f
-                result       = r writerOptions doc2 ++ ['\n' | not standalone']
+          where result       = r writerOptions doc2 ++ ['\n' | not standalone']
                 htmlFormats = ["html","html+lhs","s5","slidy","dzslides"]
                 postProcess = if selfContained && writerName' `elem` htmlFormats
                                 then makeSelfContained datadir
