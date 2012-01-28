@@ -33,22 +33,32 @@ import Text.Pandoc.Definition
 import Text.Pandoc.Shared 
 import Text.Pandoc.Templates (renderTemplate)
 import Data.List ( intersect, intercalate )
+import Scripting.Lua (LuaState)
+import qualified Scripting.Lua as Lua
 
 -- | Convert Pandoc to custom markup.
 writeCustom :: WriterOptions -> Pandoc -> IO String
 writeCustom opts (Pandoc _ blocks) = do
-  body <- blockListToCustom opts blocks
+  lua <- Lua.newstate
+  Lua.openlibs lua
+  Lua.loadstring lua (writerCustomLua opts) ""
+  Lua.call lua 0 0
+  body <- blockListToCustom lua blocks
+  Lua.close lua
   return body
 
 -- | Convert Pandoc block element to Custom.
-blockToCustom :: WriterOptions -- ^ Options
+blockToCustom :: LuaState      -- ^ Lua state
               -> Block         -- ^ Block element
               -> IO String
 
 blockToCustom _ Null = return ""
 
-blockToCustom opts (Plain inlines) =
-  inlineListToCustom opts inlines
+blockToCustom lua (Plain inlines) =
+  inlineListToCustom lua inlines
+
+blockToCustom lua (Para inlines) =  -- TODO fornow
+  inlineListToCustom lua inlines
 
 {-
 blockToCustom opts (Para [Image txt (src,tit)]) =
@@ -177,7 +187,7 @@ listAttribsToString (startnum, numstyle, _) =
           else "")
 
 -- | Convert bullet or ordered list item (list of blocks) to Custom.
-listItemToCustom :: WriterOptions -> [Block] -> State WriterState String
+listItemToCustom :: LuaState -> [Block] -> State WriterState String
 listItemToCustom opts items = do
   contents <- blockListToCustom opts items
   useTags <- get >>= return . stUseTags
@@ -188,7 +198,7 @@ listItemToCustom opts items = do
        return $ marker ++ " " ++ contents
 
 -- | Convert definition list item (label, list of blocks) to Custom.
-definitionListItemToCustom :: WriterOptions
+definitionListItemToCustom :: LuaState
                              -> ([Inline],[[Block]]) 
                              -> State WriterState String
 definitionListItemToCustom opts (label, items) = do
@@ -205,7 +215,7 @@ definitionListItemToCustom opts (label, items) = do
 
 -- Auxiliary functions for tables:
 
-tableRowToCustom :: WriterOptions
+tableRowToCustom :: LuaState
                     -> [String]
                     -> Int
                     -> [[Block]]
@@ -228,7 +238,7 @@ alignmentToString alignment = case alignment of
                                  AlignCenter  -> "center"
                                  AlignDefault -> "left"
 
-tableItemToCustom :: WriterOptions
+tableItemToCustom :: LuaState
                      -> String
                      -> String
                      -> [Block]
@@ -241,55 +251,57 @@ tableItemToCustom opts celltype align' item = do
 -}
 
 -- | Convert list of Pandoc block elements to Custom.
-blockListToCustom :: WriterOptions -- ^ Options
+blockListToCustom :: LuaState -- ^ Options
                   -> [Block]       -- ^ List of block elements
                   -> IO String
-blockListToCustom opts = fmap unlines . mapM (blockToCustom opts)
+blockListToCustom lua = fmap unlines . mapM (blockToCustom lua)
 
 -- | Convert list of Pandoc inline elements to Custom.
-inlineListToCustom :: WriterOptions -> [Inline] -> IO String
-inlineListToCustom opts lst = do
-  xs <- mapM (inlineToCustom opts) lst
+inlineListToCustom :: LuaState -> [Inline] -> IO String
+inlineListToCustom lua lst = do
+  xs <- mapM (inlineToCustom lua) lst
   return $ concat xs
 
 -- | Convert Pandoc inline element to Custom.
-inlineToCustom :: WriterOptions -> Inline -> IO String
+inlineToCustom :: LuaState -> Inline -> IO String
 
 inlineToCustom _ (Str str) = return "STR"
 
 inlineToCustom _ Space = return " "
 
-inlineToCustom opts (Emph lst) = return "EMPH"
+inlineToCustom lua (Emph lst) = do
+  x <- inlineListToCustom lua lst
+  Lua.callfunc lua "writer.emph" x
 
 {-
 
-inlineToCustom opts (Strong lst) = do
-  contents <- inlineListToCustom opts lst
+inlineToCustom lua (Strong lst) = do
+  contents <- inlineListToCustom lua lst
   return $ "'''" ++ contents ++ "'''"
 
-inlineToCustom opts (Strikeout lst) = do
-  contents <- inlineListToCustom opts lst
+inlineToCustom lua (Strikeout lst) = do
+  contents <- inlineListToCustom lua lst
   return $ "<s>" ++ contents ++ "</s>"
 
-inlineToCustom opts (Superscript lst) = do
-  contents <- inlineListToCustom opts lst
+inlineToCustom lua (Superscript lst) = do
+  contents <- inlineListToCustom lua lst
   return $ "<sup>" ++ contents ++ "</sup>"
 
-inlineToCustom opts (Subscript lst) = do
-  contents <- inlineListToCustom opts lst
+inlineToCustom lua (Subscript lst) = do
+  contents <- inlineListToCustom lua lst
   return $ "<sub>" ++ contents ++ "</sub>"
 
-inlineToCustom opts (SmallCaps lst) = inlineListToCustom opts lst
+inlineToCustom lua (SmallCaps lst) = inlineListToCustom lua lst
 
-inlineToCustom opts (Quoted SingleQuote lst) = do
-  contents <- inlineListToCustom opts lst
+inlineToCustom lua (Quoted SingleQuote lst) = do
+  contents <- inlineListToCustom lua lst
   return $ "\8216" ++ contents ++ "\8217"
 
-inlineToCustom opts (Quoted DoubleQuote lst) = do
-  contents <- inlineListToCustom opts lst
+inlineToCustom lua (Quoted DoubleQuote lst) = do
+  contents <- inlineListToCustom lua lst
   return $ "\8220" ++ contents ++ "\8221"
 
-inlineToCustom opts (Cite _  lst) = inlineListToCustom opts lst
+inlineToCustom lua (Cite _  lst) = inlineListToCustom lua lst
 
 inlineToCustom _ (Code _ str) =
   return $ "<tt>" ++ (escapeString str) ++ "</tt>"
@@ -304,8 +316,8 @@ inlineToCustom _ (RawInline _ _) = return ""
 inlineToCustom _ (LineBreak) = return "<br />\n"
 
 
-inlineToCustom opts (Link txt (src, _)) = do
-  label <- inlineListToCustom opts txt
+inlineToCustom lua (Link txt (src, _)) = do
+  label <- inlineListToCustom lua txt
   case txt of
      [Code _ s] | s == src -> return src
      _  -> if isURI src
@@ -314,8 +326,8 @@ inlineToCustom opts (Link txt (src, _)) = do
                      where src' = case src of
                                      '/':xs -> xs  -- with leading / it's a
                                      _      -> src -- link to a help page
-inlineToCustom opts (Image alt (source, tit)) = do
-  alt' <- inlineListToCustom opts alt
+inlineToCustom lua (Image alt (source, tit)) = do
+  alt' <- inlineListToCustom lua alt
   let txt = if (null tit)
                then if null alt
                        then ""
@@ -323,8 +335,8 @@ inlineToCustom opts (Image alt (source, tit)) = do
                else "|" ++ tit
   return $ "[[Image:" ++ source ++ txt ++ "]]"
 
-inlineToCustom opts (Note contents) = do 
-  contents' <- blockListToCustom opts contents
+inlineToCustom lua (Note contents) = do 
+  contents' <- blockListToCustom lua contents
   modify (\s -> s { stNotes = True })
   return $ "<ref>" ++ contents' ++ "</ref>"
   -- note - may not work for notes with multiple blocks
