@@ -74,11 +74,11 @@ instance (StackValue a, StackValue b) => StackValue [(a,b)] where
   valuetype _ = Lua.TTABLE
 
 -- | Convert Pandoc to custom markup.
-writeCustom :: WriterOptions -> Pandoc -> IO String
-writeCustom opts (Pandoc _ blocks) = do
+writeCustom :: WriterOptions -> String -> Pandoc -> IO String
+writeCustom opts luaScript (Pandoc _ blocks) = do
   lua <- Lua.newstate
   Lua.openlibs lua
-  Lua.loadstring lua (writerCustomLua opts) "custom"
+  Lua.loadstring lua luaScript "custom"
   Lua.call lua 0 0
   body <- blockListToCustom lua blocks
   Lua.close lua

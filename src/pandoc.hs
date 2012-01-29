@@ -967,8 +967,7 @@ main = do
                                       writerSlideLevel       = slideLevel,
                                       writerHighlight        = highlight,
                                       writerHighlightStyle   = highlightStyle,
-                                      writerSetextHeaders    = setextHeaders,
-                                      writerCustomLua        = ""
+                                      writerSetextHeaders    = setextHeaders
                                       }
 
   when (writerName' `elem` nonTextFormats&& outputFile == "-") $
@@ -1027,13 +1026,14 @@ main = do
               writeODT referenceODT writerOptions doc2 >>= writeBinary
           | writerName' == "docx"  ->
               writeDocx referenceDocx writerOptions doc2 >>= writeBinary
-          | otherwise -> do
-              let script = writerName' ++ ".lua"
-              exists <- doesFileExist script
+          | takeExtension writerName' == ".lua" -> do
+              exists <- doesFileExist writerName'
               unless exists $ err 9 ("Unknown writer: " ++ writerName')
-              lua <- UTF8.readFile script  -- TODO readDataFile?
-              writeCustom writerOptions{ writerCustomLua = lua } doc2
+              luaScript <- catch (UTF8.readFile writerName')
+                         (\_ -> readDataFile datadir $ "writers" </> writerName')
+              writeCustom writerOptions luaScript doc2
                 >>= writerFn outputFile
+          | otherwise -> err 9 ("Unknown writer: " ++ writerName')
         Just _
           | pdfOutput  -> do
               res <- tex2pdf latexEngine $ writeLaTeX writerOptions doc2
