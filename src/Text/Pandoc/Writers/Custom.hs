@@ -32,13 +32,12 @@ a lua writer.
 module Text.Pandoc.Writers.Custom ( writeCustom ) where
 import Text.Pandoc.Definition
 import Text.Pandoc.Shared
-import Text.Pandoc.Templates (renderTemplate)
-import Data.List ( intersect, intercalate )
+import Data.List ( intersperse )
 import Scripting.Lua (LuaState, StackValue, callfunc)
 import qualified Scripting.Lua as Lua
-import Data.Maybe (fromJust)
 import Data.ByteString.UTF8 (fromString, toString, ByteString)
 import qualified Data.ByteString.Char8 as C8
+import Data.Monoid
 
 getList :: StackValue a => LuaState -> Int -> IO [a]
 getList lua i' = do
@@ -102,8 +101,9 @@ blockToCustom _ Null = return ""
 blockToCustom lua (Plain inlines) =
   inlineListToCustom lua inlines
 
-blockToCustom lua (Para inlines) =  -- TODO fornow
-  inlineListToCustom lua inlines
+blockToCustom lua (Para inlines) = do
+  t <- inlineListToCustom lua inlines
+  callfunc lua "writer.para" t
 
 {-
 blockToCustom opts (Para [Image txt (src,tit)]) =
@@ -286,7 +286,10 @@ tableItemToCustom opts celltype align' item = do
 blockListToCustom :: LuaState -- ^ Options
                   -> [Block]       -- ^ List of block elements
                   -> IO ByteString
-blockListToCustom lua = fmap C8.unlines . mapM (blockToCustom lua)
+blockListToCustom lua xs = do
+  blocksep <- callfunc lua "writer.blocksep"
+  bs <- mapM (blockToCustom lua) xs
+  return $ mconcat $ intersperse blocksep bs
 
 -- | Convert list of Pandoc inline elements to Custom.
 inlineListToCustom :: LuaState -> [Inline] -> IO ByteString
@@ -339,8 +342,8 @@ inlineToCustom lua (Cite _  lst) = do
   x <- inlineListToCustom lua lst
   callfunc lua "writer.cite" x
 
-inlineToCustom lua (Code (id,classes,keyvals) str) =
-  callfunc lua "writer.code" (fromString str) (fromString id)
+inlineToCustom lua (Code (id',classes,keyvals) str) =
+  callfunc lua "writer.code" (fromString str) (fromString id')
       (map fromString classes)
       (map (\(k,v) -> (fromString k, fromString v)) keyvals)
 
