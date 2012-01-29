@@ -1,3 +1,4 @@
+{-# LANGUAGE OverlappingInstances, FlexibleInstances #-}
 {-
 Copyright (C) 2012 John MacFarlane <jgm@berkeley.edu>
 
@@ -33,26 +34,51 @@ import Text.Pandoc.Definition
 import Text.Pandoc.Shared
 import Text.Pandoc.Templates (renderTemplate)
 import Data.List ( intersect, intercalate )
-import Scripting.Lua (LuaState, callfunc)
+import Scripting.Lua (LuaState, StackValue, callfunc)
 import qualified Scripting.Lua as Lua
+import Data.Maybe (fromJust)
+
+getList :: StackValue a => LuaState -> Int -> IO [a]
+getList lua i' = do
+  continue <- Lua.next lua i'
+  if continue
+     then do
+       next <- Lua.peek lua (-1)
+       Lua.pop lua 1
+       x <- maybe (fail "peek returned Nothing") return next
+       rest <- getList lua i'
+       return (x : rest)
+     else return []
+
+instance StackValue a => StackValue [a] where
+  push lua xs = do
+    Lua.createtable lua (length xs + 1) 0
+    let addValue (i, x) = Lua.push lua x >> Lua.rawseti lua (-2) i
+    mapM_ addValue $ zip [1..] xs
+  peek lua i = do
+    top <- Lua.gettop lua
+    let i' = if i < 0 then top + i + 1 else i
+    Lua.pushnil lua
+    lst <- getList lua i'
+    Lua.pop lua 1
+    return (Just lst)
+  valuetype _ = Lua.TTABLE
+
+instance (StackValue a, StackValue b) => StackValue [(a,b)] where
+  push lua xs = do
+    Lua.createtable lua (length xs + 1) 0
+    let addValue (k, v) = Lua.push lua k >> Lua.push lua v >>
+                          Lua.rawset lua (-3)
+    mapM_ addValue xs
+  peek lua i = undefined -- not needed for our purposes
+  valuetype _ = Lua.TTABLE
 
 -- | Convert Pandoc to custom markup.
 writeCustom :: WriterOptions -> Pandoc -> IO String
 writeCustom opts (Pandoc _ blocks) = do
   lua <- Lua.newstate
   Lua.openlibs lua
-  -- let prefix = unlines
-  --      [ "writer = {}"
-  --      , "local meta = {}"
-  --      , "meta.__index ="
-  --      , "  function(_, key)"
-  --      , "    io.stderr:write(string.format("
-  --      , "        \"WARNING: Undefined function 'writer.%s'\n\",key))"
-  --      , "    return (function(...) return table.concat(arg,' ') end)"
-  --      , "  end"
-  --      , "setmetatable(writer, meta)"
-  --      ]
-  Lua.loadstring lua (writerCustomLua opts) ""
+  Lua.loadstring lua (writerCustomLua opts) "custom"
   Lua.call lua 0 0
   body <- blockListToCustom lua blocks
   Lua.close lua
@@ -318,8 +344,8 @@ inlineToCustom lua (Cite _  lst) = do
   x <- inlineListToCustom lua lst
   callfunc lua "writer.cite" x
 
--- inlineToCustom lua (Code attrs str) = do
---   callfunc lua "writer.code" attrs str
+inlineToCustom lua (Code (id,classes,keyvals) str) = do
+  callfunc lua "writer.code" str id classes keyvals
 
 {-
 
