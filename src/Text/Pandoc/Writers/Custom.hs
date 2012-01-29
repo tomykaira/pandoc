@@ -19,7 +19,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 {- |
    Module      : Text.Pandoc.Writers.Custom
    Copyright   : Copyright (C) 2012 John MacFarlane
-   License     : GNU GPL, version 2 or above 
+   License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
    Stability   : alpha
@@ -30,10 +30,10 @@ a lua writer.
 -}
 module Text.Pandoc.Writers.Custom ( writeCustom ) where
 import Text.Pandoc.Definition
-import Text.Pandoc.Shared 
+import Text.Pandoc.Shared
 import Text.Pandoc.Templates (renderTemplate)
 import Data.List ( intersect, intercalate )
-import Scripting.Lua (LuaState)
+import Scripting.Lua (LuaState, callfunc)
 import qualified Scripting.Lua as Lua
 
 -- | Convert Pandoc to custom markup.
@@ -41,6 +41,17 @@ writeCustom :: WriterOptions -> Pandoc -> IO String
 writeCustom opts (Pandoc _ blocks) = do
   lua <- Lua.newstate
   Lua.openlibs lua
+  -- let prefix = unlines
+  --      [ "writer = {}"
+  --      , "local meta = {}"
+  --      , "meta.__index ="
+  --      , "  function(_, key)"
+  --      , "    io.stderr:write(string.format("
+  --      , "        \"WARNING: Undefined function 'writer.%s'\n\",key))"
+  --      , "    return (function(...) return table.concat(arg,' ') end)"
+  --      , "  end"
+  --      , "setmetatable(writer, meta)"
+  --      ]
   Lua.loadstring lua (writerCustomLua opts) ""
   Lua.call lua 0 0
   body <- blockListToCustom lua blocks
@@ -265,46 +276,52 @@ inlineListToCustom lua lst = do
 -- | Convert Pandoc inline element to Custom.
 inlineToCustom :: LuaState -> Inline -> IO String
 
-inlineToCustom _ (Str str) = return "STR"
+inlineToCustom lua (Str str) =
+  callfunc lua "writer.str" str
 
-inlineToCustom _ Space = return " "
+inlineToCustom lua Space =
+  callfunc lua "writer.space"
 
 inlineToCustom lua (Emph lst) = do
   x <- inlineListToCustom lua lst
-  Lua.callfunc lua "writer.emph" x
-
-{-
+  callfunc lua "writer.emph" x
 
 inlineToCustom lua (Strong lst) = do
-  contents <- inlineListToCustom lua lst
-  return $ "'''" ++ contents ++ "'''"
+  x <- inlineListToCustom lua lst
+  callfunc lua "writer.strong" x
 
 inlineToCustom lua (Strikeout lst) = do
-  contents <- inlineListToCustom lua lst
-  return $ "<s>" ++ contents ++ "</s>"
+  x <- inlineListToCustom lua lst
+  callfunc lua "writer.strikeout" x
 
 inlineToCustom lua (Superscript lst) = do
-  contents <- inlineListToCustom lua lst
-  return $ "<sup>" ++ contents ++ "</sup>"
+  x <- inlineListToCustom lua lst
+  callfunc lua "writer.superscript" x
 
 inlineToCustom lua (Subscript lst) = do
-  contents <- inlineListToCustom lua lst
-  return $ "<sub>" ++ contents ++ "</sub>"
+  x <- inlineListToCustom lua lst
+  callfunc lua "writer.subscript" x
 
-inlineToCustom lua (SmallCaps lst) = inlineListToCustom lua lst
+inlineToCustom lua (SmallCaps lst) = do
+  x <- inlineListToCustom lua lst
+  callfunc lua "writer.smallcaps" x
 
 inlineToCustom lua (Quoted SingleQuote lst) = do
-  contents <- inlineListToCustom lua lst
-  return $ "\8216" ++ contents ++ "\8217"
+  x <- inlineListToCustom lua lst
+  callfunc lua "writer.singlequoted" x
 
 inlineToCustom lua (Quoted DoubleQuote lst) = do
-  contents <- inlineListToCustom lua lst
-  return $ "\8220" ++ contents ++ "\8221"
+  x <- inlineListToCustom lua lst
+  callfunc lua "writer.doublequoted" x
 
-inlineToCustom lua (Cite _  lst) = inlineListToCustom lua lst
+inlineToCustom lua (Cite _  lst) = do
+  x <- inlineListToCustom lua lst
+  callfunc lua "writer.cite" x
 
-inlineToCustom _ (Code _ str) =
-  return $ "<tt>" ++ (escapeString str) ++ "</tt>"
+-- inlineToCustom lua (Code attrs str) = do
+--   callfunc lua "writer.code" attrs str
+
+{-
 
 inlineToCustom _ (Math _ str) = return $ "<math>" ++ str ++ "</math>"
                                  -- note:  str should NOT be escaped
