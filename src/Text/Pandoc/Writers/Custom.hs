@@ -1,4 +1,4 @@
-{-# LANGUAGE OverlappingInstances, FlexibleInstances #-}
+{-# LANGUAGE OverlappingInstances, FlexibleInstances, OverloadedStrings #-}
 {-
 Copyright (C) 2012 John MacFarlane <jgm@berkeley.edu>
 
@@ -37,6 +37,8 @@ import Data.List ( intersect, intercalate )
 import Scripting.Lua (LuaState, StackValue, callfunc)
 import qualified Scripting.Lua as Lua
 import Data.Maybe (fromJust)
+import Data.ByteString.UTF8 (fromString, toString, ByteString)
+import qualified Data.ByteString.Char8 as C8
 
 getList :: StackValue a => LuaState -> Int -> IO [a]
 getList lua i' = do
@@ -49,6 +51,11 @@ getList lua i' = do
        rest <- getList lua i'
        return (x : rest)
      else return []
+
+instance StackValue ByteString where
+    push l x = Lua.push l $ C8.unpack x
+    peek l n = (fmap . fmap) C8.pack (Lua.peek l n)
+    valuetype _ = Lua.TSTRING
 
 instance StackValue a => StackValue [a] where
   push lua xs = do
@@ -80,14 +87,15 @@ writeCustom opts luaScript (Pandoc _ blocks) = do
   Lua.openlibs lua
   Lua.loadstring lua luaScript "custom"
   Lua.call lua 0 0
+  -- TODO - call hierarchicalize, so we have that info
   body <- blockListToCustom lua blocks
   Lua.close lua
-  return body
+  return $ toString body
 
 -- | Convert Pandoc block element to Custom.
 blockToCustom :: LuaState      -- ^ Lua state
               -> Block         -- ^ Block element
-              -> IO String
+              -> IO ByteString
 
 blockToCustom _ Null = return ""
 
@@ -125,22 +133,9 @@ blockToCustom opts (Header level inlines) = do
   let eqs = replicate level '='
   return $ eqs ++ " " ++ contents ++ " " ++ eqs ++ "\n"
 
-blockToCustom _ (CodeBlock (_,classes,_) str) = do
-  let at  = classes `intersect` ["actionscript", "ada", "apache", "applescript", "asm", "asp",
-                       "autoit", "bash", "blitzbasic", "bnf", "c", "c_mac", "caddcl", "cadlisp", "cfdg", "cfm",
-                       "cpp", "cpp-qt", "csharp", "css", "d", "delphi", "diff", "div", "dos", "eiffel", "fortran",
-                       "freebasic", "gml", "groovy", "html4strict", "idl", "ini", "inno", "io", "java", "java5",
-                       "javascript", "latex", "lisp", "lua", "matlab", "mirc", "mpasm", "mysql", "nsis", "objc",
-                       "ocaml", "ocaml-brief", "oobas", "oracle8", "pascal", "perl", "php", "php-brief", "plsql",
-                       "python", "qbasic", "rails", "reg", "robots", "ruby", "sas", "scheme", "sdlbasic",
-                       "smalltalk", "smarty", "sql", "tcl", "", "thinbasic", "tsql", "vb", "vbnet", "vhdl", 
-                       "visualfoxpro", "winbatch", "xml", "xpp", "z80"]
-  let (beg, end) = if null at
-                      then ("<pre" ++ if null classes then ">" else " class=\"" ++ unwords classes ++ "\">", "</pre>")
-                      else ("<source lang=\"" ++ head at ++ "\">", "</source>")
-  return $ beg ++ escapeString str ++ end
+blockToCustom _ (CodeBlock (_,classes,_) str) = undefined
 
-blockToCustom opts (BlockQuote blocks) = do
+lockToCustom opts (BlockQuote blocks) = do
   contents <- blockListToCustom opts blocks
   return $ "<blockquote>" ++ contents ++ "</blockquote>" 
 
@@ -290,20 +285,20 @@ tableItemToCustom opts celltype align' item = do
 -- | Convert list of Pandoc block elements to Custom.
 blockListToCustom :: LuaState -- ^ Options
                   -> [Block]       -- ^ List of block elements
-                  -> IO String
-blockListToCustom lua = fmap unlines . mapM (blockToCustom lua)
+                  -> IO ByteString
+blockListToCustom lua = fmap C8.unlines . mapM (blockToCustom lua)
 
 -- | Convert list of Pandoc inline elements to Custom.
-inlineListToCustom :: LuaState -> [Inline] -> IO String
+inlineListToCustom :: LuaState -> [Inline] -> IO ByteString
 inlineListToCustom lua lst = do
   xs <- mapM (inlineToCustom lua) lst
-  return $ concat xs
+  return $ C8.concat xs
 
 -- | Convert Pandoc inline element to Custom.
-inlineToCustom :: LuaState -> Inline -> IO String
+inlineToCustom :: LuaState -> Inline -> IO ByteString
 
 inlineToCustom lua (Str str) =
-  callfunc lua "writer.str" str
+  callfunc lua "writer.str" $ fromString str
 
 inlineToCustom lua Space =
   callfunc lua "writer.space"
@@ -344,43 +339,32 @@ inlineToCustom lua (Cite _  lst) = do
   x <- inlineListToCustom lua lst
   callfunc lua "writer.cite" x
 
-inlineToCustom lua (Code (id,classes,keyvals) str) = do
-  callfunc lua "writer.code" str id classes keyvals
+inlineToCustom lua (Code (id,classes,keyvals) str) =
+  callfunc lua "writer.code" (fromString str) (fromString id)
+      (map fromString classes)
+      (map (\(k,v) -> (fromString k, fromString v)) keyvals)
 
-{-
+inlineToCustom lua (Math DisplayMath str) =
+  callfunc lua "writer.displaymath" (fromString str)
 
-inlineToCustom _ (Math _ str) = return $ "<math>" ++ str ++ "</math>"
-                                 -- note:  str should NOT be escaped
+inlineToCustom lua (Math InlineMath str) =
+  callfunc lua "writer.inlinemath" (fromString str)
 
-inlineToCustom _ (RawInline "mediawiki" str) = return str 
-inlineToCustom _ (RawInline "html" str) = return str 
-inlineToCustom _ (RawInline _ _) = return ""
+inlineToCustom lua (RawInline format str) =
+  callfunc lua "writer.rawinline" format (fromString str)
 
-inlineToCustom _ (LineBreak) = return "<br />\n"
+inlineToCustom lua (LineBreak) =
+  callfunc lua "writer.linebreak"
 
-
-inlineToCustom lua (Link txt (src, _)) = do
+inlineToCustom lua (Link txt (src,tit)) = do
   label <- inlineListToCustom lua txt
-  case txt of
-     [Code _ s] | s == src -> return src
-     _  -> if isURI src
-              then return $ "[" ++ src ++ " " ++ label ++ "]"
-              else return $ "[[" ++ src' ++ "|" ++ label ++ "]]"
-                     where src' = case src of
-                                     '/':xs -> xs  -- with leading / it's a
-                                     _      -> src -- link to a help page
-inlineToCustom lua (Image alt (source, tit)) = do
-  alt' <- inlineListToCustom lua alt
-  let txt = if (null tit)
-               then if null alt
-                       then ""
-                       else "|" ++ alt'
-               else "|" ++ tit
-  return $ "[[Image:" ++ source ++ txt ++ "]]"
+  callfunc lua "writer.link" label (fromString src) (fromString tit)
 
-inlineToCustom lua (Note contents) = do 
+inlineToCustom lua (Image alt (src,tit)) = do
+  alt' <- inlineListToCustom lua alt
+  callfunc lua "writer.image" alt' (fromString src) (fromString tit)
+
+inlineToCustom lua (Note contents) = do
   contents' <- blockListToCustom lua contents
-  modify (\s -> s { stNotes = True })
-  return $ "<ref>" ++ contents' ++ "</ref>"
-  -- note - may not work for notes with multiple blocks
--}
+  callfunc lua "writer.note" contents'
+

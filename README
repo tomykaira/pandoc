@@ -734,10 +734,37 @@ writer:
   * `writer.space()`: a space character
   * `writer.str(s)`: a string, escaping characters in the
      string `s` as needed for the format.
-  * `writer.emph(s)`: emphasized text (here `s` is formatted
+  * `writer.emph(t)`: emphasized text (here `t` is formatted
     text)
-  * `writer.strong(s)`: strongly emphasized text
-  * TODO - finish this.
+  * `writer.strong(t)`: strongly emphasized text
+  * `writer.strikeout(t)`: strikeout
+  * `writer.subscript(t)`: subscript
+  * `writer.superscript(t)`: superscript
+  * `writer.smallcaps(t)`: small caps
+  * `writer.singlequoted(t)`: in single quotes
+  * `writer.doublequoted(t)`: in double quotes
+  * `writer.cite(t)`: citation
+  * `writer.code(s,id,classes,keyvals)`: inline verbatim text.
+    Here `s` is a raw string, `id` is an (optional) string (an
+    identifier), `classes` is an (optional) array of strings,
+    and `keyvals` is an (optional) table representing attributes
+    and their values.
+  * `writer.displaymath(s)`: display math, where `s` is LaTeX
+    math.
+  * `writer.inlinemath(s)`: inline math, where `s` is LaTeX math.
+  * `writer.linebreak()`: a hard line break.
+  * `writer.link(t,url,title)`:  a link, with label `t`, url `url`,
+    and title `title`.
+  * `writer.image(t,src,title)`: a link, with alt text `t`, source `src`,
+    and title `title`.
+  * `writer.note(t)`: a footnote with contents `t`.
+
+TODO block-level
+(should have something like interblock space, as we do in lunamark)
+interblocksep
+containersep
+also pass some writer options to the script (no-wrap, toc, smart,
+number-sections, variables, columns, identifier-prefix, userdatadir)
 
 Pandoc's markdown
 =================
