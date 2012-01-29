@@ -36,7 +36,7 @@ import Data.ByteString.Lazy.UTF8 ( fromString, toString )
 import Text.Pandoc.UTF8 as UTF8
 import System.IO ( stderr )
 import Codec.Archive.Zip
-import System.Time
+import Data.Time.Clock.POSIX
 import Paths_pandoc ( getDataFileName )
 import Text.Pandoc.Definition
 import Text.Pandoc.Generic
@@ -97,7 +97,7 @@ writeDocx :: Maybe FilePath -- ^ Path specified by --reference-docx
           -> WriterOptions  -- ^ Writer options
           -> Pandoc         -- ^ Document to convert
           -> IO B.ByteString
-writeDocx mbRefDocx opts doc@(Pandoc (Meta tit auths _) _) = do
+writeDocx mbRefDocx opts doc@(Pandoc (Meta tit auths date) _) = do
   let datadir = writerUserDataDir opts
   refArchive <- liftM toArchive $
        case mbRefDocx of
@@ -114,7 +114,7 @@ writeDocx mbRefDocx opts doc@(Pandoc (Meta tit auths _) _) = do
 
   (newContents, st) <- runStateT (writeOpenXML opts{writerWrapText = False} doc)
                        defaultWriterState
-  (TOD epochtime _) <- getClockTime
+  epochtime <- floor `fmap` getPOSIXTime
   let imgs = M.elems $ stImages st
   let imgPath ident img = "media/" ++ ident ++
                             case imageType img of
@@ -161,7 +161,8 @@ writeDocx mbRefDocx opts doc@(Pandoc (Meta tit auths _) _) = do
           ,("xmlns:dcmitype","http://purl.org/dc/dcmitype/")
           ,("xmlns:xsi","http://www.w3.org/2001/XMLSchema-instance")]
           $ mknode "dc:title" [] (stringify tit)
-          : mknode "dcterms:created" [("xsi:type","dcterms:W3CDTF")] ()  -- put doc date here
+          : mknode "dcterms:created" [("xsi:type","dcterms:W3CDTF")]
+            (maybe "" id $ normalizeDate $ stringify date)
           : mknode "dcterms:modified" [("xsi:type","dcterms:W3CDTF")] () -- put current time here
           : map (mknode "dc:creator" [] . stringify) auths
   let docPropsEntry = toEntry docPropsPath epochtime $ fromString $ showTopElement' docProps
