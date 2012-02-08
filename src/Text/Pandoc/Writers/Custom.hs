@@ -101,31 +101,18 @@ blockToCustom _ Null = return ""
 blockToCustom lua (Plain inlines) =
   inlineListToCustom lua inlines
 
+blockToCustom opts (Para [Image txt (src,tit)]) = do
+  capt <- inlineListToCustom opts txt
+  calfunc lua "writer.captioned_image" t src tit
+
 blockToCustom lua (Para inlines) = do
   t <- inlineListToCustom lua inlines
   callfunc lua "writer.para" t
 
+blockToCustom lua (RawBlock format str) =
+  callfunc lua "writer.rawblock" format (fromString str)
+
 {-
-blockToCustom opts (Para [Image txt (src,tit)]) =
-  capt <- inlineListToCustom opts txt
-  let opt = if null txt
-               then ""
-               else "|alt=" ++ if null tit then capt else tit ++
-                    "|caption " ++ capt
-  return "CAPTION-IMAGE"
-
-blockToCustom opts (Para inlines) = do
-  useTags <- get >>= return . stUseTags
-  listLevel <- get >>= return . stListLevel
-  contents <- inlineListToCustom opts inlines
-  return $ if useTags
-              then  "<p>" ++ contents ++ "</p>"
-              else contents ++ if null listLevel then "\n" else ""
-
-blockToCustom _ (RawBlock "mediawiki" str) = return str
-blockToCustom _ (RawBlock "html" str) = return str
-blockToCustom _ (RawBlock _ _) = return ""
-
 blockToCustom _ HorizontalRule = return "\n-----\n"
 
 blockToCustom opts (Header level inlines) = do
