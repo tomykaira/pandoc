@@ -42,7 +42,7 @@ import Control.Monad.State
 
 data WriterState = WriterState {
     stNotes     :: Bool            -- True if there are notes
-  , stListLevel :: [Char]          -- String at beginning of list items, e.g. "**"
+  , stListLevel :: Int             -- Count the depth to insert \n on the end of a list
   , stUseTags   :: Bool            -- True if we should use HTML tags because we're in a complex list
   }
 
@@ -50,7 +50,7 @@ data WriterState = WriterState {
 writePukiWiki :: WriterOptions -> Pandoc -> String
 writePukiWiki opts document =
   evalState (pandocToPukiWiki opts document)
-            (WriterState { stNotes = False, stListLevel = [], stUseTags = False })
+            (WriterState { stNotes = False, stListLevel = 0, stUseTags = False })
 
 -- | Return PukiWiki representation of document.
 pandocToPukiWiki :: WriterOptions -> Pandoc -> State WriterState String
@@ -97,7 +97,7 @@ blockToPukiWiki opts (Para inlines) = do
   contents <- inlineListToPukiWiki opts inlines
   return $ if useTags
               then  "<p>" ++ contents ++ "</p>"
-              else contents ++ if null listLevel then "\n" else ""
+              else contents ++ if listLevel == 0 then "\n" else ""
 
 blockToPukiWiki _ (RawBlock "pukiWiki" str) = return str
 blockToPukiWiki _ (RawBlock "html" str) = return str
@@ -133,76 +133,33 @@ blockToPukiWiki opts (Table caption aligns _ headers rows') = do
   return $ captionStr ++ intercalate "\n" (head' : body')
 
 blockToPukiWiki opts x@(BulletList items) = do
-  oldUseTags <- get >>= return . stUseTags
   listLevel <- get >>= return . stListLevel
-  let useTags = oldUseTags || not (isSimpleList x)
-  if useTags
-     then do
-        modify $ \s -> s { stUseTags = True }
-        contents <- mapM (listItemToPukiWiki opts) items
-        modify $ \s -> s { stUseTags = oldUseTags }
-        return $ "<ul>\n" ++ vcat contents ++ "</ul>\n"
-     else do
-        modify $ \s -> s { stListLevel = stListLevel s ++ "*" }
-        contents <- mapM (listItemToPukiWiki opts) items
-        modify $ \s -> s { stListLevel = init (stListLevel s) }
-        return $ vcat contents ++ if null listLevel then "\n" else ""
+  modify $ \s -> s { stListLevel = stListLevel s + 1 }
+  contents <- mapM (listItemToPukiWiki opts "-") items
+  modify $ \s -> s { stListLevel = stListLevel s - 1 }
+  return $ vcat contents ++ if listLevel == 0 then "\n" else ""
 
 blockToPukiWiki opts x@(OrderedList attribs items) = do
-  oldUseTags <- get >>= return . stUseTags
   listLevel <- get >>= return . stListLevel
-  let useTags = oldUseTags || not (isSimpleList x)
-  if useTags
-     then do
-        modify $ \s -> s { stUseTags = True }
-        contents <- mapM (listItemToPukiWiki opts) items
-        modify $ \s -> s { stUseTags = oldUseTags }
-        return $ "<ol" ++ listAttribsToString attribs ++ ">\n" ++ vcat contents ++ "</ol>\n"
-     else do
-        modify $ \s -> s { stListLevel = stListLevel s ++ "#" }
-        contents <- mapM (listItemToPukiWiki opts) items
-        modify $ \s -> s { stListLevel = init (stListLevel s) }
-        return $ vcat contents ++ if null listLevel then "\n" else ""
+  modify $ \s -> s { stListLevel = stListLevel s + 1 }
+  contents <- mapM (listItemToPukiWiki opts "+") items
+  modify $ \s -> s { stListLevel = stListLevel s - 1 }
+  return $ vcat contents ++ if listLevel == 0 then "\n" else ""
 
 blockToPukiWiki opts x@(DefinitionList items) = do
-  oldUseTags <- get >>= return . stUseTags
   listLevel <- get >>= return . stListLevel
-  let useTags = oldUseTags || not (isSimpleList x)
-  if useTags
-     then do
-        modify $ \s -> s { stUseTags = True }
-        contents <- mapM (definitionListItemToPukiWiki opts) items
-        modify $ \s -> s { stUseTags = oldUseTags }
-        return $ "<dl>\n" ++ vcat contents ++ "</dl>\n"
-     else do
-        modify $ \s -> s { stListLevel = stListLevel s ++ ";" }
-        contents <- mapM (definitionListItemToPukiWiki opts) items
-        modify $ \s -> s { stListLevel = init (stListLevel s) }
-        return $ vcat contents ++ if null listLevel then "\n" else ""
+  modify $ \s -> s { stListLevel = stListLevel s + 1 }
+  contents <- mapM (definitionListItemToPukiWiki opts) items
+  modify $ \s -> s { stListLevel = stListLevel s - 1 }
+  return $ vcat contents ++ if listLevel == 0 then "\n" else ""
 
 -- Auxiliary functions for lists:
 
--- | Convert ordered list attributes to HTML attribute string
-listAttribsToString :: ListAttributes -> String
-listAttribsToString (startnum, numstyle, _) =
-  let numstyle' = camelCaseToHyphenated $ show numstyle
-  in  (if startnum /= 1
-          then " start=\"" ++ show startnum ++ "\""
-          else "") ++
-      (if numstyle /= DefaultStyle
-          then " style=\"list-style-type: " ++ numstyle' ++ ";\""
-          else "")
-
 -- | Convert bullet or ordered list item (list of blocks) to PukiWiki.
-listItemToPukiWiki :: WriterOptions -> [Block] -> State WriterState String
-listItemToPukiWiki opts items = do
+listItemToPukiWiki :: WriterOptions -> String -> [Block] -> State WriterState String
+listItemToPukiWiki opts marker items = do
   contents <- blockListToPukiWiki opts items
-  useTags <- get >>= return . stUseTags
-  if useTags
-     then return $ "<li>" ++ contents ++ "</li>"
-     else do
-       marker <- get >>= return . stListLevel
-       return $ marker ++ " " ++ contents
+  return $ marker ++ contents
 
 -- | Convert definition list item (label, list of blocks) to PukiWiki.
 definitionListItemToPukiWiki :: WriterOptions
@@ -211,49 +168,8 @@ definitionListItemToPukiWiki :: WriterOptions
 definitionListItemToPukiWiki opts (label, items) = do
   labelText <- inlineListToPukiWiki opts label
   contents <- mapM (blockListToPukiWiki opts) items
-  useTags <- get >>= return . stUseTags
-  if useTags
-     then return $ "<dt>" ++ labelText ++ "</dt>\n" ++
-           (intercalate "\n" $ map (\d -> "<dd>" ++ d ++ "</dd>") contents)
-     else do
-       marker <- get >>= return . stListLevel
-       return $ marker ++ " " ++ labelText ++ "\n" ++
-           (intercalate "\n" $ map (\d -> init marker ++ ": " ++ d) contents)
-
--- | True if the list can be handled by simple wiki markup, False if HTML tags will be needed.
-isSimpleList :: Block -> Bool
-isSimpleList x =
-  case x of
-       BulletList items                 -> all isSimpleListItem items
-       OrderedList (num, sty, _) items  -> all isSimpleListItem items &&
-                                            num == 1 && sty `elem` [DefaultStyle, Decimal]
-       DefinitionList items             -> all isSimpleListItem $ concatMap snd items
-       _                                -> False
-
--- | True if list item can be handled with the simple wiki syntax.  False if
---   HTML tags will be needed.
-isSimpleListItem :: [Block] -> Bool
-isSimpleListItem []  = True
-isSimpleListItem [x] =
-  case x of
-       Plain _           -> True
-       Para  _           -> True
-       BulletList _      -> isSimpleList x
-       OrderedList _ _   -> isSimpleList x
-       DefinitionList _  -> isSimpleList x
-       _                 -> False
-isSimpleListItem [x, y] | isPlainOrPara x =
-  case y of
-       BulletList _      -> isSimpleList y
-       OrderedList _ _   -> isSimpleList y
-       DefinitionList _  -> isSimpleList y
-       _                 -> False
-isSimpleListItem _ = False
-
-isPlainOrPara :: Block -> Bool
-isPlainOrPara (Plain _) = True
-isPlainOrPara (Para  _) = True
-isPlainOrPara _         = False
+  return $ ":" ++ labelText ++ "|" ++
+      (intercalate "\n:|" contents)
 
 -- | Concatenates strings with line breaks between them.
 vcat :: [String] -> String
