@@ -117,26 +117,20 @@ blockToPukiWiki opts (BlockQuote blocks) = do
   contents <- blockListToPukiWiki opts blocks
   return $ prefix ">" contents ++ "\n"
 
-blockToPukiWiki opts (Table capt aligns widths headers rows') = do
-  let alignStrings = map alignmentToString aligns
-  captionDoc <- if null capt
-                   then return ""
-                   else do
-                      c <- inlineListToPukiWiki opts capt
-                      return $ "<caption>" ++ c ++ "</caption>\n"
-  let percent w = show (truncate (100*w) :: Integer) ++ "%"
-  let coltags = if all (== 0.0) widths
-                   then ""
-                   else unlines $ map
-                         (\w -> "<col width=\"" ++ percent w ++ "\" />") widths
+-- No syntax for caption, width
+blockToPukiWiki opts (Table caption aligns _ headers rows') = do
+  captionStr <- if null caption
+                then return ""
+                else do
+                  c <- inlineListToPukiWiki opts caption
+                  return $ c ++ "\n"
   head' <- if all null headers
               then return ""
               else do
-                 hs <- tableRowToPukiWiki opts alignStrings 0 headers
-                 return $ "<thead>\n" ++ hs ++ "\n</thead>\n"
-  body' <- zipWithM (tableRowToPukiWiki opts alignStrings) [1..] rows'
-  return $ "<table>\n" ++ captionDoc ++ coltags ++ head' ++
-            "<tbody>\n" ++ unlines body' ++ "</tbody>\n</table>\n"
+                 hs <- tableRowToPukiWiki opts aligns headers
+                 return $ hs ++ "h"
+  body' <- mapM (tableRowToPukiWiki opts aligns) rows'
+  return $ captionStr ++ intercalate "\n" (head' : body')
 
 blockToPukiWiki opts x@(BulletList items) = do
   oldUseTags <- get >>= return . stUseTags
@@ -277,38 +271,29 @@ prefix pref str = pref ++ foldr (\c prefixed -> if isNewline c
 -- Auxiliary functions for tables:
 
 tableRowToPukiWiki :: WriterOptions
-                    -> [String]
-                    -> Int
+                    -> [Alignment]
                     -> [[Block]]
                     -> State WriterState String
-tableRowToPukiWiki opts alignStrings rownum cols' = do
-  let celltype = if rownum == 0 then "th" else "td"
-  let rowclass = case rownum of
-                      0                  -> "header"
-                      x | x `rem` 2 == 1 -> "odd"
-                      _                  -> "even"
+tableRowToPukiWiki opts aligns cols' = do
   cols'' <- sequence $ zipWith
-            (\alignment item -> tableItemToPukiWiki opts celltype alignment item)
-            alignStrings cols'
-  return $ "<tr class=\"" ++ rowclass ++ "\">\n" ++ unlines cols'' ++ "</tr>"
+            (tableItemToPukiWiki opts)
+            aligns cols'
+  return $ "|" ++ intercalate "|" cols'' ++ "|"
 
 alignmentToString :: Alignment -> [Char]
 alignmentToString alignment = case alignment of
-                                 AlignLeft    -> "left"
-                                 AlignRight   -> "right"
-                                 AlignCenter  -> "center"
-                                 AlignDefault -> "left"
+                                 AlignLeft    -> ""
+                                 AlignRight   -> "RIGHT:"
+                                 AlignCenter  -> "CENTER:"
+                                 AlignDefault -> ""
 
 tableItemToPukiWiki :: WriterOptions
-                     -> String
-                     -> String
+                     -> Alignment
                      -> [Block]
                      -> State WriterState String
-tableItemToPukiWiki opts celltype align' item = do
-  let mkcell x = "<" ++ celltype ++ " align=\"" ++ align' ++ "\">" ++
-                    x ++ "</" ++ celltype ++ ">"
+tableItemToPukiWiki opts align' item = do
   contents <- blockListToPukiWiki opts item
-  return $ mkcell contents
+  return $ alignmentToString align' ++ contents
 
 -- | Convert list of Pandoc block elements to PukiWiki.
 blockListToPukiWiki :: WriterOptions -- ^ Options
