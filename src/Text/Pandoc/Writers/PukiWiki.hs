@@ -31,6 +31,7 @@ PukiWiki:  <http://pukiwiki.sourceforge.jp/>
 -}
 module Text.Pandoc.Writers.PukiWiki ( writePukiWiki ) where
 import Text.Pandoc.Definition
+import Text.Pandoc.Generic
 import Text.Pandoc.Options
 import Text.Pandoc.Shared
 import Text.Pandoc.Templates (renderTemplate)
@@ -110,23 +111,11 @@ blockToPukiWiki opts (Header level inlines) = do
   return $ eqs ++ " " ++ contents ++ " " ++ eqs ++ "\n"
 
 blockToPukiWiki _ (CodeBlock (_,classes,_) str) = do
-  let at  = classes `intersect` ["actionscript", "ada", "apache", "applescript", "asm", "asp",
-                       "autoit", "bash", "blitzbasic", "bnf", "c", "c_mac", "caddcl", "cadlisp", "cfdg", "cfm",
-                       "cpp", "cpp-qt", "csharp", "css", "d", "delphi", "diff", "div", "dos", "eiffel", "fortran",
-                       "freebasic", "gml", "groovy", "html4strict", "idl", "ini", "inno", "io", "java", "java5",
-                       "javascript", "latex", "lisp", "lua", "matlab", "mirc", "mpasm", "mysql", "nsis", "objc",
-                       "ocaml", "ocaml-brief", "oobas", "oracle8", "pascal", "perl", "php", "php-brief", "plsql",
-                       "python", "qbasic", "rails", "reg", "robots", "ruby", "sas", "scheme", "sdlbasic",
-                       "smalltalk", "smarty", "sql", "tcl", "", "thinbasic", "tsql", "vb", "vbnet", "vhdl",
-                       "visualfoxpro", "winbatch", "xml", "xpp", "z80"]
-  let (beg, end) = if null at
-                      then ("<pre" ++ if null classes then ">" else " class=\"" ++ unwords classes ++ "\">", "</pre>")
-                      else ("<source lang=\"" ++ head at ++ "\">", "</source>")
-  return $ beg ++ escapeString str ++ end
+  return $ prefix " " str ++ "\n"
 
 blockToPukiWiki opts (BlockQuote blocks) = do
   contents <- blockListToPukiWiki opts blocks
-  return $ "<blockquote>" ++ contents ++ "</blockquote>"
+  return $ prefix ">" contents ++ "\n"
 
 blockToPukiWiki opts (Table capt aligns widths headers rows') = do
   let alignStrings = map alignmentToString aligns
@@ -275,6 +264,15 @@ isPlainOrPara _         = False
 -- | Concatenates strings with line breaks between them.
 vcat :: [String] -> String
 vcat = intercalate "\n"
+
+-- | Prefix the specified string for every line.
+prefix :: String -> String -> String
+prefix pref str = pref ++ foldr (\c prefixed -> if isNewline c
+                                                then c : pref ++ prefixed
+                                                else c : prefixed) "" (stripTrailingNewlines str)
+    where
+      isNewline '\n' = True
+      isNewline _    = False
 
 -- Auxiliary functions for tables:
 
