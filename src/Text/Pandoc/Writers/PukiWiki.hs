@@ -83,21 +83,14 @@ blockToPukiWiki opts (Plain inlines) =
   inlineListToPukiWiki opts inlines
 
 blockToPukiWiki opts (Para [Image txt (src,tit)]) = do
-  capt <- if null txt
-             then return ""
-             else ("|caption " ++) `fmap` inlineListToPukiWiki opts txt
-  let opt = if null txt
-               then ""
-               else "|alt=" ++ if null tit then capt else tit ++ capt
-  return $ "[[Image:" ++ src ++ "|frame|none" ++ opt ++ "]]\n"
+  capt <- inlineListToPukiWiki opts txt
+  let title = if null tit then capt else tit ++ capt
+  return $ "&ref(" ++ src ++ "," ++ title ++ ");\n"
 
 blockToPukiWiki opts (Para inlines) = do
-  useTags <- get >>= return . stUseTags
   listLevel <- get >>= return . stListLevel
   contents <- inlineListToPukiWiki opts inlines
-  return $ if useTags
-              then  "<p>" ++ contents ++ "</p>"
-              else contents ++ if listLevel == 0 then "\n" else ""
+  return $ contents ++ if listLevel == 0 then "\n" else ""
 
 blockToPukiWiki _ (RawBlock "pukiWiki" str) = return str
 blockToPukiWiki _ (RawBlock "html" str) = return str
@@ -107,8 +100,8 @@ blockToPukiWiki _ HorizontalRule = return "\n-----\n"
 
 blockToPukiWiki opts (Header level inlines) = do
   contents <- inlineListToPukiWiki opts inlines
-  let eqs = replicate level '='
-  return $ eqs ++ " " ++ contents ++ " " ++ eqs ++ "\n"
+  let eqs = replicate level '*'
+  return $ eqs ++ " " ++ contents ++ "\n"
 
 blockToPukiWiki _ (CodeBlock (_,classes,_) str) = do
   return $ prefix " " str ++ "\n"
