@@ -31,36 +31,27 @@ PukiWiki:  <http://pukiwiki.sourceforge.jp/>
 -}
 module Text.Pandoc.Writers.PukiWiki ( writePukiWiki ) where
 import Text.Pandoc.Definition
-import Text.Pandoc.Generic
 import Text.Pandoc.Options
 import Text.Pandoc.Shared
 import Text.Pandoc.Templates (renderTemplate)
 import Text.Pandoc.XML ( escapeStringForXML )
-import Data.List ( intersect, intercalate )
-import Network.URI ( isURI )
+import Data.List ( intercalate )
 import Control.Monad.State
 
 data WriterState = WriterState {
-    stNotes     :: Bool            -- True if there are notes
-  , stListLevel :: Int             -- Count the depth to insert \n on the end of a list
-  , stUseTags   :: Bool            -- True if we should use HTML tags because we're in a complex list
+     stListLevel :: Int             -- Count the depth to insert \n on the end of a list
   }
 
 -- | Convert Pandoc to PukiWiki.
 writePukiWiki :: WriterOptions -> Pandoc -> String
 writePukiWiki opts document =
   evalState (pandocToPukiWiki opts document)
-            (WriterState { stNotes = False, stListLevel = 0, stUseTags = False })
+            (WriterState { stListLevel = 0 })
 
 -- | Return PukiWiki representation of document.
 pandocToPukiWiki :: WriterOptions -> Pandoc -> State WriterState String
 pandocToPukiWiki opts (Pandoc _ blocks) = do
-  body <- blockListToPukiWiki opts blocks
-  notesExist <- get >>= return . stNotes
-  let notes = if notesExist
-                 then "\n<references />"
-                 else ""
-  let main = body ++ notes
+  main <- blockListToPukiWiki opts blocks
   let context = writerVariables opts ++
                 [ ("body", main) ] ++
                 [ ("toc", "yes") | writerTableOfContents opts ]
@@ -103,7 +94,7 @@ blockToPukiWiki opts (Header level inlines) = do
   let eqs = replicate level '*'
   return $ eqs ++ " " ++ contents ++ "\n"
 
-blockToPukiWiki _ (CodeBlock (_,classes,_) str) = do
+blockToPukiWiki _ (CodeBlock (_,_,_) str) = do
   return $ prefix " " str ++ "\n"
 
 blockToPukiWiki opts (BlockQuote blocks) = do
@@ -125,21 +116,21 @@ blockToPukiWiki opts (Table caption aligns _ headers rows') = do
   body' <- mapM (tableRowToPukiWiki opts aligns) rows'
   return $ captionStr ++ intercalate "\n" (head' : body')
 
-blockToPukiWiki opts x@(BulletList items) = do
+blockToPukiWiki opts (BulletList items) = do
   listLevel <- get >>= return . stListLevel
   modify $ \s -> s { stListLevel = stListLevel s + 1 }
   contents <- mapM (listItemToPukiWiki opts "-") items
   modify $ \s -> s { stListLevel = stListLevel s - 1 }
   return $ vcat contents ++ if listLevel == 0 then "\n" else ""
 
-blockToPukiWiki opts x@(OrderedList attribs items) = do
+blockToPukiWiki opts (OrderedList _ items) = do
   listLevel <- get >>= return . stListLevel
   modify $ \s -> s { stListLevel = stListLevel s + 1 }
   contents <- mapM (listItemToPukiWiki opts "+") items
   modify $ \s -> s { stListLevel = stListLevel s - 1 }
   return $ vcat contents ++ if listLevel == 0 then "\n" else ""
 
-blockToPukiWiki opts x@(DefinitionList items) = do
+blockToPukiWiki opts (DefinitionList items) = do
   listLevel <- get >>= return . stListLevel
   modify $ \s -> s { stListLevel = stListLevel s + 1 }
   contents <- mapM (definitionListItemToPukiWiki opts) items
@@ -277,6 +268,5 @@ inlineToPukiWiki opts (Image alt (src, tit)) = do
 
 inlineToPukiWiki opts (Note contents) = do
   contents' <- blockListToPukiWiki opts contents
-  modify (\s -> s { stNotes = True })
   return $ "((" ++ contents' ++ "))"
   -- note - may not work for notes with multiple blocks
