@@ -85,7 +85,7 @@ blockToPukiWiki opts (Plain inlines) =
 blockToPukiWiki opts (Para [Image txt (src,tit)]) = do
   capt <- inlineListToPukiWiki opts txt
   let title = if null tit then capt else tit ++ capt
-  return $ "&ref(" ++ src ++ "," ++ title ++ ");\n"
+  return $ "#ref(" ++ src ++ "," ++ title ++ ")\n"
 
 blockToPukiWiki opts (Para inlines) = do
   listLevel <- get >>= return . stListLevel
@@ -221,23 +221,21 @@ inlineToPukiWiki :: WriterOptions -> Inline -> State WriterState String
 
 inlineToPukiWiki opts (Emph lst) = do
   contents <- inlineListToPukiWiki opts lst
-  return $ "''" ++ contents ++ "''"
+  return $ "'''" ++ contents ++ "'''"
 
 inlineToPukiWiki opts (Strong lst) = do
   contents <- inlineListToPukiWiki opts lst
-  return $ "'''" ++ contents ++ "'''"
+  return $ "''" ++ contents ++ "''"
 
 inlineToPukiWiki opts (Strikeout lst) = do
   contents <- inlineListToPukiWiki opts lst
-  return $ "<s>" ++ contents ++ "</s>"
+  return $ "%%" ++ contents ++ "%%"
 
-inlineToPukiWiki opts (Superscript lst) = do
-  contents <- inlineListToPukiWiki opts lst
-  return $ "<sup>" ++ contents ++ "</sup>"
+-- not supported
+inlineToPukiWiki opts (Superscript lst) = inlineListToPukiWiki opts lst
 
-inlineToPukiWiki opts (Subscript lst) = do
-  contents <- inlineListToPukiWiki opts lst
-  return $ "<sub>" ++ contents ++ "</sub>"
+-- not supported
+inlineToPukiWiki opts (Subscript lst) = inlineListToPukiWiki opts lst
 
 inlineToPukiWiki opts (SmallCaps lst) = inlineListToPukiWiki opts lst
 
@@ -252,42 +250,33 @@ inlineToPukiWiki opts (Quoted DoubleQuote lst) = do
 inlineToPukiWiki opts (Cite _  lst) = inlineListToPukiWiki opts lst
 
 inlineToPukiWiki _ (Code _ str) =
-  return $ "<tt>" ++ (escapeString str) ++ "</tt>"
+  return $ "&color(midnightblue){" ++ str ++ "};"
 
 inlineToPukiWiki _ (Str str) = return $ escapeString str
 
-inlineToPukiWiki _ (Math _ str) = return $ "<math>" ++ str ++ "</math>"
+-- not supported by default
+inlineToPukiWiki _ (Math _ str) = return $ prefix " " str
                                  -- note:  str should NOT be escaped
 
 inlineToPukiWiki _ (RawInline "pukiWiki" str) = return str
 inlineToPukiWiki _ (RawInline "html" str) = return str
 inlineToPukiWiki _ (RawInline _ _) = return ""
 
-inlineToPukiWiki _ (LineBreak) = return "<br />\n"
+inlineToPukiWiki _ (LineBreak) = return "&br;\n"
 
 inlineToPukiWiki _ Space = return " "
 
 inlineToPukiWiki opts (Link txt (src, _)) = do
   label <- inlineListToPukiWiki opts txt
-  case txt of
-     [Code _ s] | s == src -> return src
-     _  -> if isURI src
-              then return $ "[" ++ src ++ " " ++ label ++ "]"
-              else return $ "[[" ++ src' ++ "|" ++ label ++ "]]"
-                     where src' = case src of
-                                     '/':xs -> xs  -- with leading / it's a
-                                     _      -> src -- link to a help page
-inlineToPukiWiki opts (Image alt (source, tit)) = do
-  alt' <- inlineListToPukiWiki opts alt
-  let txt = if (null tit)
-               then if null alt
-                       then ""
-                       else "|" ++ alt'
-               else "|" ++ tit
-  return $ "[[Image:" ++ source ++ txt ++ "]]"
+  return $ "[[" ++ label ++ ">" ++ src ++ "]]"
+
+inlineToPukiWiki opts (Image alt (src, tit)) = do
+  capt <- inlineListToPukiWiki opts alt
+  let title = if null tit then capt else tit ++ capt
+  return $ "&ref(" ++ src ++ "," ++ title ++ ");"
 
 inlineToPukiWiki opts (Note contents) = do
   contents' <- blockListToPukiWiki opts contents
   modify (\s -> s { stNotes = True })
-  return $ "<ref>" ++ contents' ++ "</ref>"
+  return $ "((" ++ contents' ++ "))"
   -- note - may not work for notes with multiple blocks
